@@ -1,33 +1,33 @@
 <!DOCTYPE html>
-<html>
+<html lang="ru">
 <head>
     <meta charset="utf-8">
-    <title>Call App</title>
+    <title>Связь</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
     <style>
         body { font-family: sans-serif; text-align: center; padding: 20px; background: #121212; color: white; }
         .card { background: #1e1e1e; padding: 20px; border-radius: 15px; margin-bottom: 20px; border: 1px solid #333; }
-        button { width: 100%; padding: 15px; border-radius: 10px; border: none; font-size: 1.2rem; cursor: pointer; color: white; font-weight: bold; }
-        .pasha-btn { background: #007bff; margin-bottom: 10px; }
-        .drug-btn { background: #28a745; }
+        button { width: 100%; padding: 20px; border-radius: 15px; border: none; font-size: 1.2rem; cursor: pointer; color: white; font-weight: bold; margin: 10px 0; }
+        .blue-btn { background: #007bff; }
+        .green-btn { background: #28a745; }
         #status { color: #888; margin-top: 20px; }
     </style>
 </head>
 <body>
 
-    <h2>WHO ARE YOU?</h2>
-    <div id="setup">
-        <button class="pasha-btn" onclick="start('pasha')">I AM PASHA</button>
-        <button class="drug-btn" onclick="start('drug')">I AM FRIEND</button>
+    <div id="login-screen">
+        <h2>КТО ВЫ?</h2>
+        <button class="blue-btn" onclick="init('pasha')">Я — ПАША</button>
+        <button class="green-btn" onclick="init('drug')">Я — ДРУГ</button>
     </div>
 
-    <div id="main" style="display:none;">
+    <div id="call-screen" style="display:none;">
         <div class="card">
-            <p id="info"></p>
-            <button class="drug-btn" id="callBtn" onclick="makeCall()">CALL PARTNER</button>
+            <h3 id="user-info"></h3>
+            <button class="green-btn" onclick="makeCall()">ПОЗВОНИТЬ</button>
         </div>
-        <div id="status">Ready</div>
+        <div id="status">Подключение к сети...</div>
     </div>
 
     <audio id="remoteAudio" autoplay></audio>
@@ -35,34 +35,40 @@
     <script>
         let myId, targetId, peer;
 
-        function start(name) {
+        function init(name) {
             myId = name;
             targetId = (name === 'pasha') ? 'drug' : 'pasha';
             
-            document.getElementById('setup').style.display = 'none';
-            document.getElementById('main').style.display = 'block';
-            document.getElementById('info').innerText = "Logged in as: " + myId.toUpperCase();
+            document.getElementById('login-screen').style.display = 'none';
+            document.getElementById('call-screen').style.display = 'block';
+            document.getElementById('user-info').innerText = "Вы зашли как: " + myId.toUpperCase();
             
             peer = new Peer(myId);
 
+            peer.on('open', () => {
+                document.getElementById('status').innerText = "В сети. Можно звонить.";
+            });
+
             peer.on('call', (call) => {
-                navigator.mediaDevices.getUserMedia({video: false, audio: true}).then((stream) => {
-                    call.answer(stream);
-                    call.on('stream', (remoteStream) => {
-                        document.getElementById('remoteAudio').srcObject = remoteStream;
-                        document.getElementById('status').innerText = "Connected!";
+                if(confirm("Входящий звонок! Ответить?")) {
+                    navigator.mediaDevices.getUserMedia({video: false, audio: true}).then((stream) => {
+                        call.answer(stream);
+                        call.on('stream', (remoteStream) => {
+                            document.getElementById('remoteAudio').srcObject = remoteStream;
+                            document.getElementById('status').innerText = "Разговор...";
+                        });
                     });
-                });
+                }
             });
         }
 
         function makeCall() {
-            document.getElementById('status').innerText = "Calling " + targetId + "...";
+            document.getElementById('status').innerText = "Звоню...";
             navigator.mediaDevices.getUserMedia({video: false, audio: true}).then((stream) => {
                 const call = peer.call(targetId, stream);
                 call.on('stream', (remoteStream) => {
                     document.getElementById('remoteAudio').srcObject = remoteStream;
-                    document.getElementById('status').innerText = "Connected!";
+                    document.getElementById('status').innerText = "Разговор...";
                 });
             });
         }
