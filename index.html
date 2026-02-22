@@ -2,37 +2,39 @@
 <html lang="ru">
 <head>
     <meta charset="utf-8">
-    <title>Warszawa Call</title>
+    <title>Связь</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.1.3/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.1.3/firebase-database-compat.js"></script>
     <style>
         body { font-family: sans-serif; text-align: center; background: #000; color: white; padding: 20px; margin: 0; }
-        .btn-call { background: #28a745; width: 100%; padding: 30px; border-radius: 20px; font-size: 1.8rem; font-weight: bold; border: none; color: white; margin-top: 20px; }
-        .btn-hangup { background: #d9534f; width: 100%; padding: 25px; border-radius: 20px; font-size: 1.5rem; font-weight: bold; border: none; color: white; margin-top: 20px; }
-        .btn-accept { background: #28a745; width: 100%; padding: 40px; border-radius: 20px; font-size: 2.5rem; border: none; color: white; margin-bottom: 20px; }
-        #incoming-screen { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #000; padding-top: 100px; z-index: 999; }
-        .status-area { background: #111; padding: 10px; border-radius: 10px; color: #0f0; font-size: 1rem; margin-bottom: 20px; border: 1px solid #333; }
+        .status-area { background: #111; padding: 15px; border-radius: 10px; color: #0f0; margin-bottom: 20px; border: 1px solid #333; font-size: 1.1rem; }
+        .btn-call { background: #28a745; width: 100%; padding: 35px; border-radius: 25px; font-size: 2rem; font-weight: bold; border: none; color: white; margin-top: 20px; box-shadow: 0 5px 15px rgba(40,167,69,0.4); }
+        .btn-accept { background: #28a745; width: 100%; padding: 45px; border-radius: 25px; font-size: 2.5rem; border: none; color: white; }
+        #incoming-screen { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #000; padding-top: 80px; z-index: 9999; }
+        .error-msg { color: #ff4444; font-size: 0.9rem; margin-top: 10px; }
     </style>
 </head>
 <body>
 
     <div id="main-ui">
-        <h2>СВЯЗЬ С СЫНОМ</h2>
-        <div id="status" class="status-area">ПОДКЛЮЧЕНИЕ...</div>
-        <div id="users-list">Поиск...</div>
+        <h2 style="margin-top:0;">СВЯЗЬ</h2>
+        <div id="status" class="status-area">ПРОВЕРКА СЕТИ...</div>
+        <div id="users-list">Ожидание...</div>
+        <div id="debug-info" class="error-msg"></div>
+        <button style="margin-top:40px; background:#333; color:#aaa; border:none; padding:10px; border-radius:10px;" onclick="location.reload()">ОБНОВИТЬ СВЯЗЬ</button>
     </div>
 
     <div id="incoming-screen">
-        <h1 style="font-size: 3rem;">СЫН ЗВОНИТ!</h1>
+        <h1 style="font-size: 3rem; color:#0f0;">ЗВОНОК!</h1>
         <button class="btn-accept" onclick="acceptCall()">ОТВЕТИТЬ</button>
-        <button style="background:#444; color:white; border:none; padding:15px; border-radius:10px; width:80%;" onclick="declineCall()">СБРОСИТЬ</button>
+        <button style="margin-top:30px; background:#444; color:white; border:none; padding:15px; border-radius:15px; width:80%;" onclick="location.reload()">СБРОСИТЬ</button>
     </div>
 
     <div id="active-call-ui" style="display:none;">
-        <h1 style="color:#0f0;">ГОВОРИ!</h1>
-        <button class="btn-hangup" onclick="endCall()">ПОЛОЖИТЬ ТРУБКУ</button>
+        <h1 style="color:#0f0; font-size:3rem;">ГОВОРИ!</h1>
+        <button style="background:#d9534f; width:100%; padding:40px; border-radius:25px; color:white; font-size:2rem; border:none;" onclick="location.reload()">ЗАКОНЧИТЬ</button>
     </div>
 
     <audio id="remoteAudio" autoplay playsinline></audio>
@@ -52,24 +54,34 @@
 
         const app = firebase.initializeApp(firebaseConfig);
         const db = firebase.database();
-        
-        // Постоянный ID для мамы (чтобы база не путалась)
-        const isMom = /iPhone|Android/i.test(navigator.userAgent);
-        const myId = isMom ? 'MAMA' : 'SYN'; 
-        
-        const peer = new Peer(myId);
+        const myId = /iPhone|Android/i.test(navigator.userAgent) ? 'MAMA' : 'SYN';
+
+        // Добавляем больше серверов для обхода блокировок ДНР
+        const peer = new Peer(myId, {
+            config: {'iceServers': [
+                { urls: 'stun:stun.l.google.com:19302' },
+                { urls: 'stun:stun1.l.google.com:19302' },
+                { urls: 'stun:stun2.l.google.com:19302' },
+                { urls: 'stun:stun.ekiga.net' },
+                { urls: 'stun:stun.ideasip.com' }
+            ]},
+            debug: 1
+        });
+
         const audioEl = document.getElementById('remoteAudio');
         const ringtone = document.getElementById('ringtone');
         let currentCall = null;
 
         peer.on('open', (id) => {
-            document.getElementById('status').innerText = "Я В СЕТИ";
-            // Записываемся в базу принудительно
-            db.ref('online_calls/' + id).set({ online: true, time: Date.now() });
+            document.getElementById('status').innerText = "Я В СЕТИ (ОК)";
+            db.ref('online_calls/' + id).set({t: Date.now()});
             db.ref('online_calls/' + id).onDisconnect().remove();
         });
 
-        // Каждую секунду проверяем, кто пришел
+        peer.on('error', (err) => {
+            document.getElementById('debug-info').innerText = "Ошибка связи. Попробуй включить/выключить интернет.";
+        });
+
         db.ref('online_calls').on('value', (snapshot) => {
             const listDiv = document.getElementById('users-list');
             let html = '';
@@ -79,7 +91,7 @@
                     html += `<button class="btn-call" onclick="makeCall('${child.key}')">${label}</button>`;
                 }
             });
-            listDiv.innerHTML = html || "Ждем, когда второй зайдет...";
+            listDiv.innerHTML = html || "Ждем, когда сын/мама зайдет...";
         });
 
         peer.on('call', (call) => {
@@ -95,7 +107,7 @@
                 currentCall.answer(stream);
                 showActiveUI();
                 currentCall.on('stream', s => { audioEl.srcObject = s; });
-            });
+            }).catch(() => alert("Нажми 'Разрешить' для микрофона!"));
         }
 
         function makeCall(tid) {
@@ -106,11 +118,11 @@
             });
         }
 
-        function declineCall() { ringtone.pause(); if(currentCall) currentCall.close(); resetUI(); }
-        function endCall() { if(currentCall) currentCall.close(); resetUI(); }
-        function showActiveUI() { document.getElementById('main-ui').style.display = 'none'; document.getElementById('incoming-screen').style.display = 'none'; document.getElementById('active-call-ui').style.display = 'block'; }
-        function resetUI() { document.getElementById('main-ui').style.display = 'block'; document.getElementById('incoming-screen').style.display = 'none'; document.getElementById('active-call-ui').style.display = 'none'; }
+        function showActiveUI() { 
+            document.getElementById('main-ui').style.display='none'; 
+            document.getElementById('incoming-screen').style.display='none'; 
+            document.getElementById('active-call-ui').style.display='block'; 
+        }
     </script>
 </body>
 </html>
-
