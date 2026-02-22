@@ -2,48 +2,44 @@
 <html lang="ru">
 <head>
     <meta charset="utf-8">
-    <title>Warszawa Courier Call</title>
+    <title>Warszawa Call</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.1.3/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.1.3/firebase-database-compat.js"></script>
     <style>
-        body { font-family: sans-serif; text-align: center; background: #121212; color: white; padding: 20px; margin: 0; }
+        body { font-family: sans-serif; text-align: center; background: #000; color: white; padding: 20px; margin: 0; }
         .container { max-width: 400px; margin: 0 auto; }
-        .user-item { background: #1e1e1e; padding: 20px; border-radius: 15px; border: 1px solid #333; margin: 15px 0; display: flex; justify-content: space-between; align-items: center; }
         
-        button { border: none; padding: 15px 25px; border-radius: 12px; font-weight: bold; cursor: pointer; font-size: 1rem; color: white; transition: 0.2s; }
-        .btn-call { background: #28a745; }
-        .btn-hangup { background: #d9534f; width: 100%; margin-top: 20px; }
-        .btn-accept { background: #28a745; flex: 1; margin-right: 10px; padding: 20px; }
-        .btn-decline { background: #d9534f; flex: 1; padding: 20px; }
+        /* Большая кнопка для мамы */
+        .btn-call { background: #28a745; width: 100%; padding: 25px; border-radius: 20px; font-size: 1.5rem; font-weight: bold; border: none; color: white; margin-top: 20px; }
+        .btn-hangup { background: #d9534f; width: 100%; padding: 25px; border-radius: 20px; font-size: 1.5rem; font-weight: bold; border: none; color: white; margin-top: 20px; }
+        
+        .btn-accept { background: #28a745; width: 100%; padding: 30px; border-radius: 20px; font-size: 1.8rem; border: none; color: white; margin-bottom: 15px; }
+        .btn-decline { background: #555; width: 100%; padding: 20px; border-radius: 20px; font-size: 1.2rem; border: none; color: white; }
 
-        #incoming-screen { display: none; background: #1e1e1e; padding: 30px; border-radius: 20px; border: 2px solid #28a745; margin-top: 50px; }
-        .incoming-buttons { display: flex; justify-content: space-between; margin-top: 25px; }
-        
-        .status-area { background: #000; padding: 10px; border-radius: 10px; margin-bottom: 20px; color: #aaa; font-size: 0.9rem; border: 1px dashed #444; }
-        .calling-animation { animation: pulse 1s infinite; color: #28a745; }
-        @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
+        #incoming-screen { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #000; padding-top: 100px; z-index: 999; }
+        .status-area { background: #111; padding: 15px; border-radius: 10px; color: #0f0; margin-bottom: 20px; font-weight: bold; }
     </style>
 </head>
-<body onclick="enableAudioContext()"> <div class="container">
+<body onclick="startAudio()">
+
+    <div class="container">
         <div id="main-ui">
-            <h2>Связь</h2>
-            <div id="status" class="status-area">Нажмите в любом месте для активации звука</div>
-            <div id="users-list">Поиск абонентов...</div>
+            <h2>СВЯЗЬ С СЫНОМ</h2>
+            <div id="status" class="status-area">Нажми здесь один раз!</div>
+            <div id="users-list">Поиск...</div>
         </div>
 
         <div id="incoming-screen">
-            <h2 class="calling-animation">ВХОДЯЩИЙ ВЫЗОВ</h2>
-            <p id="caller-id" style="color: #aaa;"></p>
-            <div class="incoming-buttons">
-                <button class="btn-accept" onclick="acceptCall()">ПРИНЯТЬ</button>
-                <button class="btn-decline" onclick="declineCall()">ОТКЛОНИТЬ</button>
-            </div>
+            <h1 style="font-size: 2.5rem;">ТЕБЕ ЗВОНЯТ!</h1>
+            <button class="btn-accept" onclick="acceptCall()">ОТВЕТИТЬ</button>
+            <button class="btn-decline" onclick="declineCall()">СБРОСИТЬ</button>
         </div>
 
         <div id="active-call-ui" style="display:none;">
-            <button class="btn-hangup" onclick="endCall()">ЗАВЕРШИТЬ РАЗГОВОР</button>
+            <h2 id="call-timer">РАЗГОВОР...</h2>
+            <button class="btn-hangup" onclick="endCall()">ПОЛОЖИТЬ ТРУБКУ</button>
         </div>
     </div>
 
@@ -66,7 +62,6 @@
 
         firebase.initializeApp(firebaseConfig);
         const db = firebase.database();
-
         const myId = 'User-' + Math.floor(Math.random() * 9000);
         const peer = new Peer(myId);
         const audioEl = document.getElementById('remoteAudio');
@@ -74,14 +69,16 @@
         
         let currentCall = null;
         let incomingCallRequest = null;
-        let audioEnabled = false;
 
-        // Функция для разблокировки звука браузером
-        function enableAudioContext() {
-            if (!audioEnabled) {
-                audioEnabled = true;
-                document.getElementById('status').innerText = "Звук активирован. Ожидание...";
-            }
+        // Запрашиваем микрофон СРАЗУ, чтобы потом не тупило
+        function startAudio() {
+            navigator.mediaDevices.getUserMedia({audio: true}).then(s => {
+                s.getTracks().forEach(t => t.stop()); // Просто проверили доступ
+                document.getElementById('status').innerText = "ВСЁ ГОТОВО";
+                ringtone.play().then(() => ringtone.pause()); // Разрешаем звук
+            }).catch(() => {
+                document.getElementById('status').innerText = "НАЖМИ 'РАЗРЕШИТЬ'!";
+            });
         }
 
         peer.on('open', (id) => {
@@ -96,91 +93,50 @@
             snapshot.forEach((child) => {
                 const userId = child.key;
                 if (userId !== myId) {
-                    const div = document.createElement('div');
-                    div.className = 'user-item';
-                    div.innerHTML = `<span>Абонент ${userId}</span> 
-                        <button class="btn-call" onclick="makeCall('${userId}')">ПОЗВОНИТЬ</button>`;
-                    listDiv.appendChild(div);
+                    listDiv.innerHTML += `<button class="btn-call" onclick="makeCall('${userId}')">ПОЗВОНИТЬ</button>`;
                 }
             });
         });
 
-        // ПРИЕМ ЗВОНКА
         peer.on('call', (call) => {
             incomingCallRequest = call;
-            // Включаем рингтон
-            ringtone.play().catch(e => console.log("Нужен клик для звука"));
-            
+            ringtone.play();
             document.getElementById('main-ui').style.display = 'none';
             document.getElementById('incoming-screen').style.display = 'block';
-            document.getElementById('caller-id').innerText = "Звонит: " + call.peer;
         });
 
         function acceptCall() {
-            if (incomingCallRequest) {
-                ringtone.pause(); // Выключаем рингтон
-                ringtone.currentTime = 0;
-                
-                navigator.mediaDevices.getUserMedia({audio: true}).then(stream => {
-                    incomingCallRequest.answer(stream);
-                    currentCall = incomingCallRequest;
-                    showActiveCallUI();
-                    currentCall.on('stream', remStream => {
-                        audioEl.srcObject = remStream;
-                        audioEl.play();
-                    });
-                    currentCall.on('close', () => endCall());
-                });
-            }
-        }
-
-        function declineCall() {
             ringtone.pause();
-            ringtone.currentTime = 0;
-            if (incomingCallRequest) {
-                incomingCallRequest.close();
-                incomingCallRequest = null;
-            }
-            resetUI();
-        }
-
-        function makeCall(targetId) {
-            document.getElementById('status').innerText = "Вызов: " + targetId;
             navigator.mediaDevices.getUserMedia({audio: true}).then(stream => {
-                const call = peer.call(targetId, stream);
-                currentCall = call;
-                showActiveCallUI();
-                call.on('stream', remStream => {
-                    audioEl.srcObject = remStream;
-                    audioEl.play();
-                    document.getElementById('status').innerText = "В ЭФИРЕ";
-                });
-                call.on('close', () => endCall());
+                incomingCallRequest.answer(stream);
+                currentCall = incomingCallRequest;
+                showActiveUI();
+                currentCall.on('stream', s => { audioEl.srcObject = s; audioEl.play(); });
+                currentCall.on('close', endCall);
             });
         }
 
-        function endCall() {
-            if (currentCall) currentCall.close();
-            currentCall = null;
-            incomingCallRequest = null;
-            audioEl.srcObject = null;
-            ringtone.pause();
-            resetUI();
+        function declineCall() { ringtone.pause(); if(incomingCallRequest) incomingCallRequest.close(); resetUI(); }
+        
+        function makeCall(tid) {
+            navigator.mediaDevices.getUserMedia({audio: true}).then(stream => {
+                currentCall = peer.call(tid, stream);
+                showActiveUI();
+                currentCall.on('stream', s => { audioEl.srcObject = s; audioEl.play(); });
+                currentCall.on('close', endCall);
+            });
         }
 
-        function showActiveCallUI() {
-            document.getElementById('main-ui').style.display = 'block';
-            document.getElementById('incoming-screen').style.display = 'none';
-            document.getElementById('active-call-ui').style.display = 'block';
-            document.getElementById('users-list').style.display = 'none';
+        function endCall() { if(currentCall) currentCall.close(); audioEl.srcObject = null; ringtone.pause(); resetUI(); }
+        function showActiveUI() { 
+            document.getElementById('main-ui').style.display = 'none'; 
+            document.getElementById('incoming-screen').style.display = 'none'; 
+            document.getElementById('active-call-ui').style.display = 'block'; 
         }
-
-        function resetUI() {
-            document.getElementById('main-ui').style.display = 'block';
-            document.getElementById('incoming-screen').style.display = 'none';
-            document.getElementById('active-call-ui').style.display = 'none';
-            document.getElementById('users-list').style.display = 'block';
-            document.getElementById('status').innerText = "Вы в сети: " + myId;
+        function resetUI() { 
+            document.getElementById('main-ui').style.display = 'block'; 
+            document.getElementById('incoming-screen').style.display = 'none'; 
+            document.getElementById('active-call-ui').style.display = 'none'; 
         }
     </script>
 </body>
