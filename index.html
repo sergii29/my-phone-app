@@ -10,36 +10,32 @@
     <style>
         body { font-family: sans-serif; text-align: center; background: #000; color: white; padding: 20px; margin: 0; }
         .container { max-width: 400px; margin: 0 auto; }
-        
-        /* Большая кнопка для мамы */
         .btn-call { background: #28a745; width: 100%; padding: 25px; border-radius: 20px; font-size: 1.5rem; font-weight: bold; border: none; color: white; margin-top: 20px; }
         .btn-hangup { background: #d9534f; width: 100%; padding: 25px; border-radius: 20px; font-size: 1.5rem; font-weight: bold; border: none; color: white; margin-top: 20px; }
-        
         .btn-accept { background: #28a745; width: 100%; padding: 30px; border-radius: 20px; font-size: 1.8rem; border: none; color: white; margin-bottom: 15px; }
         .btn-decline { background: #555; width: 100%; padding: 20px; border-radius: 20px; font-size: 1.2rem; border: none; color: white; }
-
         #incoming-screen { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #000; padding-top: 100px; z-index: 999; }
-        .status-area { background: #111; padding: 15px; border-radius: 10px; color: #0f0; margin-bottom: 20px; font-weight: bold; }
+        .status-area { background: #111; padding: 15px; border-radius: 10px; color: #0f0; margin-bottom: 20px; font-size: 0.8rem; }
     </style>
 </head>
-<body onclick="startAudio()">
+<body>
 
     <div class="container">
         <div id="main-ui">
-            <h2>СВЯЗЬ С СЫНОМ</h2>
-            <div id="status" class="status-area">Нажми здесь один раз!</div>
-            <div id="users-list">Поиск...</div>
+            <h2 id="title">СВЯЗЬ</h2>
+            <div id="status" class="status-area">Подключение...</div>
+            <div id="users-list">Ожидание собеседника...</div>
         </div>
 
         <div id="incoming-screen">
-            <h1 style="font-size: 2.5rem;">ТЕБЕ ЗВОНЯТ!</h1>
+            <h1 style="font-size: 2.5rem;">ЗВОНОК!</h1>
             <button class="btn-accept" onclick="acceptCall()">ОТВЕТИТЬ</button>
             <button class="btn-decline" onclick="declineCall()">СБРОСИТЬ</button>
         </div>
 
         <div id="active-call-ui" style="display:none;">
-            <h2 id="call-timer">РАЗГОВОР...</h2>
-            <button class="btn-hangup" onclick="endCall()">ПОЛОЖИТЬ ТРУБКУ</button>
+            <h2>РАЗГОВОР...</h2>
+            <button class="btn-hangup" onclick="endCall()">ЗАВЕРШИТЬ</button>
         </div>
     </div>
 
@@ -62,45 +58,41 @@
 
         firebase.initializeApp(firebaseConfig);
         const db = firebase.database();
-        const myId = 'User-' + Math.floor(Math.random() * 9000);
+        
+        // Генерируем ID один раз и храним в сессии
+        const myId = 'ID-' + Math.floor(Math.random() * 10000);
         const peer = new Peer(myId);
+        
         const audioEl = document.getElementById('remoteAudio');
         const ringtone = document.getElementById('ringtone');
-        
         let currentCall = null;
         let incomingCallRequest = null;
 
-        // Запрашиваем микрофон СРАЗУ, чтобы потом не тупило
-        function startAudio() {
-            navigator.mediaDevices.getUserMedia({audio: true}).then(s => {
-                s.getTracks().forEach(t => t.stop()); // Просто проверили доступ
-                document.getElementById('status').innerText = "ВСЁ ГОТОВО";
-                ringtone.play().then(() => ringtone.pause()); // Разрешаем звук
-            }).catch(() => {
-                document.getElementById('status').innerText = "НАЖМИ 'РАЗРЕШИТЬ'!";
-            });
-        }
-
         peer.on('open', (id) => {
+            document.getElementById('status').innerText = "В СЕТИ: " + id;
             const userRef = db.ref('online_calls/' + id);
-            userRef.set(Date.now());
+            userRef.set(true);
             userRef.onDisconnect().remove();
         });
 
+        // Слушаем базу
         db.ref('online_calls').on('value', (snapshot) => {
             const listDiv = document.getElementById('users-list');
             listDiv.innerHTML = '';
+            let found = false;
             snapshot.forEach((child) => {
-                const userId = child.key;
-                if (userId !== myId) {
-                    listDiv.innerHTML += `<button class="btn-call" onclick="makeCall('${userId}')">ПОЗВОНИТЬ</button>`;
+                if (child.key !== myId) {
+                    found = true;
+                    listDiv.innerHTML += `<button class="btn-call" onclick="makeCall('${child.key}')">ПОЗВОНИТЬ</button>`;
                 }
             });
+            if (!found) listDiv.innerHTML = "Никого нет в сети";
         });
 
+        // Входящий
         peer.on('call', (call) => {
             incomingCallRequest = call;
-            ringtone.play();
+            ringtone.play().catch(() => {}); 
             document.getElementById('main-ui').style.display = 'none';
             document.getElementById('incoming-screen').style.display = 'block';
         });
@@ -111,32 +103,43 @@
                 incomingCallRequest.answer(stream);
                 currentCall = incomingCallRequest;
                 showActiveUI();
-                currentCall.on('stream', s => { audioEl.srcObject = s; audioEl.play(); });
+                currentCall.on('stream', s => { audioEl.srcObject = s; });
                 currentCall.on('close', endCall);
-            });
+            }).catch(e => alert("Разрешите микрофон в настройках!"));
         }
 
-        function declineCall() { ringtone.pause(); if(incomingCallRequest) incomingCallRequest.close(); resetUI(); }
-        
+        function declineCall() {
+            ringtone.pause();
+            if(incomingCallRequest) incomingCallRequest.close();
+            resetUI();
+        }
+
         function makeCall(tid) {
             navigator.mediaDevices.getUserMedia({audio: true}).then(stream => {
                 currentCall = peer.call(tid, stream);
                 showActiveUI();
-                currentCall.on('stream', s => { audioEl.srcObject = s; audioEl.play(); });
+                currentCall.on('stream', s => { audioEl.srcObject = s; });
                 currentCall.on('close', endCall);
-            });
+            }).catch(e => alert("Разрешите микрофон!"));
         }
 
-        function endCall() { if(currentCall) currentCall.close(); audioEl.srcObject = null; ringtone.pause(); resetUI(); }
-        function showActiveUI() { 
-            document.getElementById('main-ui').style.display = 'none'; 
-            document.getElementById('incoming-screen').style.display = 'none'; 
-            document.getElementById('active-call-ui').style.display = 'block'; 
+        function endCall() {
+            if(currentCall) currentCall.close();
+            audioEl.srcObject = null;
+            ringtone.pause();
+            resetUI();
         }
-        function resetUI() { 
-            document.getElementById('main-ui').style.display = 'block'; 
-            document.getElementById('incoming-screen').style.display = 'none'; 
-            document.getElementById('active-call-ui').style.display = 'none'; 
+
+        function showActiveUI() {
+            document.getElementById('main-ui').style.display = 'none';
+            document.getElementById('incoming-screen').style.display = 'none';
+            document.getElementById('active-call-ui').style.display = 'block';
+        }
+
+        function resetUI() {
+            document.getElementById('main-ui').style.display = 'block';
+            document.getElementById('incoming-screen').style.display = 'none';
+            document.getElementById('active-call-ui').style.display = 'none';
         }
     </script>
 </body>
