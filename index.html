@@ -2,27 +2,39 @@
 <html lang="ru">
 <head>
     <meta charset="utf-8">
-    <title>Warsaw Courier Call</title>
+    <title>Warszawa Courier Call</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.1.3/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.1.3/firebase-database-compat.js"></script>
     <style>
-        body { font-family: sans-serif; text-align: center; background: #121212; color: white; padding: 20px; }
-        .user-item { background: #1e1e1e; padding: 20px; border-radius: 15px; border: 1px solid #333; margin: 10px 0; display: flex; justify-content: space-between; align-items: center; }
-        button { background: #28a745; color: white; border: none; padding: 12px 20px; border-radius: 10px; font-weight: bold; cursor: pointer; }
-        .status-text { color: #888; margin-bottom: 20px; }
+        body { font-family: sans-serif; text-align: center; background: #121212; color: white; padding: 20px; margin: 0; }
+        .container { max-width: 400px; margin: 0 auto; }
+        .user-item { background: #1e1e1e; padding: 20px; border-radius: 15px; border: 1px solid #333; margin: 15px 0; display: flex; justify-content: space-between; align-items: center; transition: 0.3s; }
+        .user-item:active { transform: scale(0.98); }
+        button { background: #28a745; color: white; border: none; padding: 12px 24px; border-radius: 10px; font-weight: bold; cursor: pointer; font-size: 1rem; }
+        button:disabled { background: #555; }
+        .status-area { background: #000; padding: 10px; border-radius: 10px; margin-bottom: 20px; color: #aaa; font-size: 0.9rem; border: 1px dashed #444; }
+        h2 { color: #fff; margin-bottom: 5px; }
+        .calling { background: #d9534f !important; animation: pulse 1.5s infinite; }
+        @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
     </style>
 </head>
 <body>
 
-    <h2>Кто в сети:</h2>
-    <div id="status" class="status-text">Подключение к системе...</div>
-    <div id="users-list"></div>
+    <div class="container">
+        <h2>Связь</h2>
+        <div id="status" class="status-area">Инициализация...</div>
+        
+        <div id="users-list">
+            <p style="color: #555;">Поиск абонентов в сети...</p>
+        </div>
+    </div>
 
-    <audio id="remoteAudio" autoplay></audio>
+    <audio id="remoteAudio" autoplay playsinline></audio>
 
     <script>
+        // Твой конфиг Firebase
         const firebaseConfig = {
             apiKey: "AIzaSyChrQMyO2soPgoEHq_f3aYs5Cs19q3sWEk",
             authDomain: "warszawa-courier.firebaseapp.com",
@@ -40,49 +52,88 @@
         // Создаем случайный ID для сессии
         const myId = 'User-' + Math.floor(Math.random() * 9000);
         const peer = new Peer(myId);
+        const audioEl = document.getElementById('remoteAudio');
 
         peer.on('open', (id) => {
-            document.getElementById('status').innerText = "Вы в сети (" + id + ")";
+            document.getElementById('status').innerText = "Вы в сети: " + id;
             // Регистрируемся в базе
             const userRef = db.ref('online_calls/' + id);
-            userRef.set(true);
+            userRef.set(Date.now()); // Записываем время входа
             userRef.onDisconnect().remove();
         });
 
-        // Слушаем список из базы
+        // Следим за списком из базы
         db.ref('online_calls').on('value', (snapshot) => {
             const listDiv = document.getElementById('users-list');
             listDiv.innerHTML = '';
+            let count = 0;
+
             snapshot.forEach((child) => {
                 const userId = child.key;
                 if (userId !== myId) {
+                    count++;
                     const div = document.createElement('div');
                     div.className = 'user-item';
-                    div.innerHTML = `<span>Абонент: ${userId}</span> <button onclick="makeCall('${userId}')">ПОЗВОНИТЬ</button>`;
+                    div.innerHTML = `
+                        <span>Абонент ${userId}</span> 
+                        <button id="btn-${userId}" onclick="makeCall('${userId}')">ПОЗВОНИТЬ</button>
+                    `;
                     listDiv.appendChild(div);
                 }
             });
+
+            if (count === 0) {
+                listDiv.innerHTML = '<p style="color: #555;">Никого нет в сети</p>';
+            }
         });
 
-        // Входящий звонок
+        // Обработка ВХОДЯЩЕГО звонка
         peer.on('call', (call) => {
+            document.getElementById('status').innerText = "ВХОДЯЩИЙ ВЫЗОВ...";
+            
             if(confirm("Вам звонят! Ответить?")) {
                 navigator.mediaDevices.getUserMedia({audio: true}).then(stream => {
                     call.answer(stream);
+                    document.getElementById('status').innerText = "СОЕДИНЕНИЕ...";
+                    
                     call.on('stream', remStream => {
-                        document.getElementById('remoteAudio').srcObject = remStream;
+                        audioEl.srcObject = remStream;
+                        audioEl.play().catch(e => console.error("Ошибка автоплея:", e));
+                        document.getElementById('status').innerText = "РАЗГОВОР...";
                     });
+                }).catch(err => {
+                    alert("Ошибка доступа к микрофону: " + err);
                 });
             }
         });
 
-        // Исходящий звонок
+        // Функция ИСХОДЯЩЕГО звонка
         function makeCall(targetId) {
+            const btn = document.getElementById('btn-' + targetId);
+            btn.innerText = "ЗВОНЮ...";
+            btn.className = 'calling';
+            document.getElementById('status').innerText = "ВЫЗОВ: " + targetId;
+
             navigator.mediaDevices.getUserMedia({audio: true}).then(stream => {
                 const call = peer.call(targetId, stream);
+                
                 call.on('stream', remStream => {
-                    document.getElementById('remoteAudio').srcObject = remStream;
+                    audioEl.srcObject = remStream;
+                    audioEl.play().catch(e => console.error("Ошибка автоплея:", e));
+                    document.getElementById('status').innerText = "НА СВЯЗИ";
+                    btn.innerText = "В ЭФИРЕ";
                 });
+
+                call.on('close', () => {
+                    document.getElementById('status').innerText = "ЗВОНОК ЗАВЕРШЕН";
+                    btn.innerText = "ПОЗВОНИТЬ";
+                    btn.className = '';
+                });
+
+            }).catch(err => {
+                alert("Микрофон не найден или заблокирован!");
+                btn.innerText = "ОШИБКА";
+                btn.className = '';
             });
         }
     </script>
