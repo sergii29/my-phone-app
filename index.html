@@ -10,14 +10,11 @@
     <style>
         body { font-family: sans-serif; text-align: center; background: #121212; color: white; padding: 20px; margin: 0; }
         .container { max-width: 400px; margin: 0 auto; }
-        .user-item { background: #1e1e1e; padding: 20px; border-radius: 15px; border: 1px solid #333; margin: 15px 0; display: flex; justify-content: space-between; align-items: center; transition: 0.3s; }
-        .user-item:active { transform: scale(0.98); }
+        .user-item { background: #1e1e1e; padding: 20px; border-radius: 15px; border: 1px solid #333; margin: 15px 0; display: flex; justify-content: space-between; align-items: center; }
         button { background: #28a745; color: white; border: none; padding: 12px 24px; border-radius: 10px; font-weight: bold; cursor: pointer; font-size: 1rem; }
-        button:disabled { background: #555; }
+        .hangup-btn { background: #d9534f !important; } /* Красная кнопка */
         .status-area { background: #000; padding: 10px; border-radius: 10px; margin-bottom: 20px; color: #aaa; font-size: 0.9rem; border: 1px dashed #444; }
         h2 { color: #fff; margin-bottom: 5px; }
-        .calling { background: #d9534f !important; animation: pulse 1.5s infinite; }
-        @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
     </style>
 </head>
 <body>
@@ -25,16 +22,12 @@
     <div class="container">
         <h2>Связь</h2>
         <div id="status" class="status-area">Инициализация...</div>
-        
-        <div id="users-list">
-            <p style="color: #555;">Поиск абонентов в сети...</p>
-        </div>
+        <div id="users-list">Поиск абонентов...</div>
     </div>
 
     <audio id="remoteAudio" autoplay playsinline></audio>
 
     <script>
-        // Твой конфиг Firebase
         const firebaseConfig = {
             apiKey: "AIzaSyChrQMyO2soPgoEHq_f3aYs5Cs19q3sWEk",
             authDomain: "warszawa-courier.firebaseapp.com",
@@ -49,91 +42,101 @@
         firebase.initializeApp(firebaseConfig);
         const db = firebase.database();
 
-        // Создаем случайный ID для сессии
         const myId = 'User-' + Math.floor(Math.random() * 9000);
         const peer = new Peer(myId);
         const audioEl = document.getElementById('remoteAudio');
+        let currentCall = null; // Здесь храним текущий звонок
 
         peer.on('open', (id) => {
             document.getElementById('status').innerText = "Вы в сети: " + id;
-            // Регистрируемся в базе
             const userRef = db.ref('online_calls/' + id);
-            userRef.set(Date.now()); // Записываем время входа
+            userRef.set(Date.now());
             userRef.onDisconnect().remove();
         });
 
-        // Следим за списком из базы
+        // Список пользователей
         db.ref('online_calls').on('value', (snapshot) => {
             const listDiv = document.getElementById('users-list');
             listDiv.innerHTML = '';
-            let count = 0;
-
             snapshot.forEach((child) => {
                 const userId = child.key;
                 if (userId !== myId) {
-                    count++;
                     const div = document.createElement('div');
                     div.className = 'user-item';
-                    div.innerHTML = `
-                        <span>Абонент ${userId}</span> 
-                        <button id="btn-${userId}" onclick="makeCall('${userId}')">ПОЗВОНИТЬ</button>
-                    `;
+                    div.innerHTML = `<span>Абонент ${userId}</span> 
+                        <button id="btn-${userId}" onclick="handleBtnClick('${userId}')">ПОЗВОНИТЬ</button>`;
                     listDiv.appendChild(div);
                 }
             });
-
-            if (count === 0) {
-                listDiv.innerHTML = '<p style="color: #555;">Никого нет в сети</p>';
-            }
         });
 
-        // Обработка ВХОДЯЩЕГО звонка
+        // Клик по кнопке (либо звонить, либо сбросить)
+        function handleBtnClick(targetId) {
+            const btn = document.getElementById('btn-' + targetId);
+            if (currentCall) {
+                endCall(); // Если уже говорим — сбрасываем
+            } else {
+                makeCall(targetId); // Если нет — звоним
+            }
+        }
+
+        // Входящий звонок
         peer.on('call', (call) => {
-            document.getElementById('status').innerText = "ВХОДЯЩИЙ ВЫЗОВ...";
-            
             if(confirm("Вам звонят! Ответить?")) {
+                currentCall = call;
                 navigator.mediaDevices.getUserMedia({audio: true}).then(stream => {
                     call.answer(stream);
-                    document.getElementById('status').innerText = "СОЕДИНЕНИЕ...";
-                    
+                    updateUI(true);
                     call.on('stream', remStream => {
                         audioEl.srcObject = remStream;
-                        audioEl.play().catch(e => console.error("Ошибка автоплея:", e));
-                        document.getElementById('status').innerText = "РАЗГОВОР...";
+                        audioEl.play();
                     });
-                }).catch(err => {
-                    alert("Ошибка доступа к микрофону: " + err);
+                    // Если тот человек сбросил
+                    call.on('close', () => endCall());
                 });
             }
         });
 
-        // Функция ИСХОДЯЩЕГО звонка
+        // Исходящий звонок
         function makeCall(targetId) {
-            const btn = document.getElementById('btn-' + targetId);
-            btn.innerText = "ЗВОНЮ...";
-            btn.className = 'calling';
-            document.getElementById('status').innerText = "ВЫЗОВ: " + targetId;
-
+            document.getElementById('status').innerText = "Звоним...";
             navigator.mediaDevices.getUserMedia({audio: true}).then(stream => {
                 const call = peer.call(targetId, stream);
-                
+                currentCall = call;
+                updateUI(true, targetId);
+
                 call.on('stream', remStream => {
                     audioEl.srcObject = remStream;
-                    audioEl.play().catch(e => console.error("Ошибка автоплея:", e));
-                    document.getElementById('status').innerText = "НА СВЯЗИ";
-                    btn.innerText = "В ЭФИРЕ";
+                    audioEl.play();
+                    document.getElementById('status').innerText = "РАЗГОВОР...";
                 });
 
-                call.on('close', () => {
-                    document.getElementById('status').innerText = "ЗВОНОК ЗАВЕРШЕН";
+                call.on('close', () => endCall());
+            });
+        }
+
+        // Функция завершения
+        function endCall() {
+            if (currentCall) {
+                currentCall.close();
+                currentCall = null;
+            }
+            audioEl.srcObject = null;
+            document.getElementById('status').innerText = "Звонок завершен";
+            updateUI(false);
+        }
+
+        // Обновление кнопок (Зеленая -> Красная)
+        function updateUI(isCalling, targetId = "") {
+            const buttons = document.querySelectorAll('button');
+            buttons.forEach(btn => {
+                if (isCalling) {
+                    btn.innerText = "СБРОСИТЬ";
+                    btn.className = "hangup-btn";
+                } else {
                     btn.innerText = "ПОЗВОНИТЬ";
-                    btn.className = '';
-                });
-
-            }).catch(err => {
-                alert("Микрофон не найден или заблокирован!");
-                btn.innerText = "ОШИБКА";
-                btn.className = '';
+                    btn.className = "";
+                }
             });
         }
     </script>
