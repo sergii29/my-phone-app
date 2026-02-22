@@ -8,20 +8,22 @@
     <script src="https://www.gstatic.com/firebasejs/9.1.3/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.1.3/firebase-database-compat.js"></script>
     <style>
-        body { font-family: sans-serif; text-align: center; background: #000; color: white; padding: 20px; margin: 0; }
-        .status-area { background: #1a1a1a; padding: 20px; border-radius: 15px; color: #0f0; margin-bottom: 20px; border: 2px solid #333; font-size: 1.2rem; }
-        .btn-call { background: #28a745; width: 100%; padding: 35px; border-radius: 25px; font-size: 1.8rem; font-weight: bold; border: none; color: white; margin-top: 20px; box-shadow: 0 10px 20px rgba(0,0,0,0.5); }
-        .btn-accept { background: #28a745; width: 100%; padding: 45px; border-radius: 25px; font-size: 2.5rem; border: none; color: white; }
+        body { font-family: sans-serif; text-align: center; background: #000; color: white; padding: 20px; margin: 0; overflow: hidden; }
+        .status-area { background: #1a1a1a; padding: 15px; border-radius: 15px; color: #0f0; margin-bottom: 20px; border: 1px solid #333; font-weight: bold; }
+        .btn-call { background: #28a745; width: 100%; padding: 30px; border-radius: 20px; font-size: 1.8rem; font-weight: bold; border: none; color: white; margin-top: 15px; }
+        .btn-accept { background: #28a745; width: 100%; padding: 40px; border-radius: 25px; font-size: 2.5rem; border: none; color: white; }
         #incoming-screen { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #000; padding-top: 80px; z-index: 9999; }
+        .loader { color: #555; font-size: 0.8rem; margin-top: 10px; }
     </style>
 </head>
 <body>
 
     <div id="main-ui">
-        <h2>СВЯЗЬ</h2>
-        <div id="status" class="status-area">ПОДКЛЮЧЕНИЕ...<br><small style="color:#666; font-size:0.7rem;">Если висит долго - включи VPN</small></div>
-        <div id="users-list">Ожидание мамы/сына...</div>
-        <button style="margin-top:50px; background:none; border:1px solid #444; color:#666; padding:10px; border-radius:10px;" onclick="location.reload()">ОБНОВИТЬ</button>
+        <h2 style="color: #ccc;">ЛИНИЯ СВЯЗИ</h2>
+        <div id="status" class="status-area">ЗАПУСК...</div>
+        <div id="users-list">Ищем маму/сына...</div>
+        <button style="margin-top:40px; background:#222; color:#888; border:1px solid #444; padding:12px 20px; border-radius:12px; font-size: 1rem;" onclick="location.reload()">ПЕРЕЗАГРУЗИТЬ</button>
+        <div class="loader">Если не грузит 10 сек — включи VPN</div>
     </div>
 
     <div id="incoming-screen">
@@ -30,8 +32,8 @@
     </div>
 
     <div id="active-call-ui" style="display:none;">
-        <h1 style="color:#0f0; font-size:2.5rem;">ГОВОРИ!</h1>
-        <button style="background:#d9534f; width:100%; padding:40px; border-radius:25px; color:white; font-size:2rem; border:none;" onclick="location.reload()">ЗАКОНЧИТЬ</button>
+        <h1 style="color:#0f0; font-size:2.5rem; margin-top: 50px;">В ЭФИРЕ</h1>
+        <button style="background:#d9534f; width:90%; padding:35px; border-radius:20px; color:white; font-size:1.8rem; border:none; margin-top: 50px;" onclick="location.reload()">СБРОСИТЬ</button>
     </div>
 
     <audio id="remoteAudio" autoplay playsinline></audio>
@@ -50,43 +52,50 @@
 
         firebase.initializeApp(firebaseConfig);
         const db = firebase.database();
-        const myId = /iPhone|Android/i.test(navigator.userAgent) ? 'MAMA' : 'SYN';
+        const myRole = /iPhone|Android/i.test(navigator.userAgent) ? 'MAMA' : 'SYN';
 
-        // Максимальный набор серверов для "пробития" Промтелекома
-        const peer = new Peer(myId, {
+        // Создаем Peer с настройками обхода NAT (STUN сервера)
+        const peer = new Peer(myRole, {
             config: {'iceServers': [
                 { urls: 'stun:stun.l.google.com:19302' },
-                { urls: 'stun:stun1.l.google.com:19302' },
-                { urls: 'stun:stun.l.google.com:19305' }, // Доп порт
-                { urls: 'stun:stun.services.mozilla.com' },
-                { urls: 'stun:stun.systweak.com' }
-            ]}
+                { urls: 'stun:stun1.l.google.com:19302' }
+            ]},
+            debug: 1
         });
 
         const audioEl = document.getElementById('remoteAudio');
         const ringtone = document.getElementById('ringtone');
-        let currentCall = null;
+        let activeCall = null;
 
         peer.on('open', (id) => {
-            document.getElementById('status').innerText = "Я В СЕТИ (ОК)";
-            db.ref('online_calls/' + id).set({t: Date.now()});
-            db.ref('online_calls/' + id).onDisconnect().remove();
+            document.getElementById('status').innerText = "Я В СЕТИ";
+            // Чистим старые записи и ставим себя
+            const userRef = db.ref('online_calls/' + id);
+            userRef.set({ active: true });
+            userRef.onDisconnect().remove();
         });
 
+        // Слушаем базу
         db.ref('online_calls').on('value', (snapshot) => {
             const listDiv = document.getElementById('users-list');
-            let html = '';
+            let found = false;
+            listDiv.innerHTML = '';
             snapshot.forEach((child) => {
-                if (child.key !== myId) {
-                    const label = (child.key === 'SYN') ? 'ПОЗВОНИТЬ СЫНУ' : 'ПОЗВОНИТЬ МАМЕ';
-                    html += `<button class="btn-call" onclick="makeCall('${child.key}')">${label}</button>`;
+                if (child.key !== myRole) {
+                    found = true;
+                    const btnLabel = (child.key === 'SYN') ? 'ПОЗВОНИТЬ СЫНУ' : 'ПОЗВОНИТЬ МАМЕ';
+                    const btn = document.createElement('button');
+                    btn.className = 'btn-call';
+                    btn.innerText = btnLabel;
+                    btn.onclick = () => makeCall(child.key);
+                    listDiv.appendChild(btn);
                 }
             });
-            listDiv.innerHTML = html || "Второй еще не зашел...";
+            if (!found) listDiv.innerHTML = "<p style='color:#666;'>Второй абонент не в сети</p>";
         });
 
         peer.on('call', (call) => {
-            currentCall = call;
+            activeCall = call;
             ringtone.play().catch(() => {});
             document.getElementById('main-ui').style.display = 'none';
             document.getElementById('incoming-screen').style.display = 'block';
@@ -95,22 +104,31 @@
         function acceptCall() {
             ringtone.pause();
             navigator.mediaDevices.getUserMedia({audio: true}).then(stream => {
-                currentCall.answer(stream);
+                activeCall.answer(stream);
                 showActiveUI();
-                currentCall.on('stream', s => { audioEl.srcObject = s; });
+                activeCall.on('stream', s => { audioEl.srcObject = s; });
             });
         }
 
-        function makeCall(tid) {
+        function makeCall(targetId) {
             navigator.mediaDevices.getUserMedia({audio: true}).then(stream => {
-                currentCall = peer.call(tid, stream);
+                activeCall = peer.call(targetId, stream);
                 showActiveUI();
-                currentCall.on('stream', s => { audioEl.srcObject = s; });
+                activeCall.on('stream', s => { audioEl.srcObject = s; });
             });
         }
 
-        function showActiveUI() { document.getElementById('main-ui').style.display='none'; document.getElementById('incoming-screen').style.display='none'; document.getElementById('active-call-ui').style.display='block'; }
+        function showActiveUI() {
+            document.getElementById('main-ui').style.display = 'none';
+            document.getElementById('incoming-screen').style.display = 'none';
+            document.getElementById('active-call-ui').style.display = 'block';
+        }
+
+        // Если возникают ошибки - просто перезагружаем через 3 сек
+        peer.on('error', () => {
+            document.getElementById('status').innerText = "ОШИБКА. ПЕРЕЗАПУСК...";
+            setTimeout(() => location.reload(), 3000);
+        });
     </script>
 </body>
 </html>
-
