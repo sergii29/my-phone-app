@@ -11,18 +11,45 @@
         body { font-family: sans-serif; text-align: center; background: #121212; color: white; padding: 20px; margin: 0; }
         .container { max-width: 400px; margin: 0 auto; }
         .user-item { background: #1e1e1e; padding: 20px; border-radius: 15px; border: 1px solid #333; margin: 15px 0; display: flex; justify-content: space-between; align-items: center; }
-        button { background: #28a745; color: white; border: none; padding: 12px 24px; border-radius: 10px; font-weight: bold; cursor: pointer; font-size: 1rem; }
-        .hangup-btn { background: #d9534f !important; } /* Красная кнопка */
+        
+        /* Кнопки */
+        button { border: none; padding: 15px 25px; border-radius: 12px; font-weight: bold; cursor: pointer; font-size: 1rem; color: white; transition: 0.2s; }
+        .btn-call { background: #28a745; }
+        .btn-hangup { background: #d9534f; width: 100%; margin-top: 20px; }
+        .btn-accept { background: #28a745; flex: 1; margin-right: 10px; padding: 20px; }
+        .btn-decline { background: #d9534f; flex: 1; padding: 20px; }
+
+        /* Экран входящего вызова */
+        #incoming-screen { display: none; background: #1e1e1e; padding: 30px; border-radius: 20px; border: 2px solid #28a745; margin-top: 50px; }
+        .incoming-buttons { display: flex; justify-content: space-between; margin-top: 25px; }
+        
         .status-area { background: #000; padding: 10px; border-radius: 10px; margin-bottom: 20px; color: #aaa; font-size: 0.9rem; border: 1px dashed #444; }
-        h2 { color: #fff; margin-bottom: 5px; }
+        h2 { margin-bottom: 5px; }
+        .calling-animation { animation: pulse 1.5s infinite; }
+        @keyframes pulse { 0% { box-shadow: 0 0 0 0px rgba(40, 167, 69, 0.4); } 100% { box-shadow: 0 0 0 20px rgba(40, 167, 69, 0); } }
     </style>
 </head>
 <body>
 
     <div class="container">
-        <h2>Связь</h2>
-        <div id="status" class="status-area">Инициализация...</div>
-        <div id="users-list">Поиск абонентов...</div>
+        <div id="main-ui">
+            <h2>Связь</h2>
+            <div id="status" class="status-area">Инициализация...</div>
+            <div id="users-list">Поиск абонентов...</div>
+        </div>
+
+        <div id="incoming-screen">
+            <h2 class="calling-animation">ВХОДЯЩИЙ ВЫЗОВ</h2>
+            <p id="caller-id" style="color: #aaa;"></p>
+            <div class="incoming-buttons">
+                <button class="btn-accept" onclick="acceptCall()">ПРИНЯТЬ</button>
+                <button class="btn-decline" onclick="declineCall()">ОТКЛОНИТЬ</button>
+            </div>
+        </div>
+
+        <div id="active-call-ui" style="display:none;">
+            <button class="btn-hangup" onclick="endCall()">ЗАВЕРШИТЬ РАЗГОВОР</button>
+        </div>
     </div>
 
     <audio id="remoteAudio" autoplay playsinline></audio>
@@ -45,7 +72,9 @@
         const myId = 'User-' + Math.floor(Math.random() * 9000);
         const peer = new Peer(myId);
         const audioEl = document.getElementById('remoteAudio');
-        let currentCall = null; // Здесь храним текущий звонок
+        
+        let currentCall = null;
+        let incomingCallRequest = null;
 
         peer.on('open', (id) => {
             document.getElementById('status').innerText = "Вы в сети: " + id;
@@ -54,7 +83,7 @@
             userRef.onDisconnect().remove();
         });
 
-        // Список пользователей
+        // Обновление списка людей
         db.ref('online_calls').on('value', (snapshot) => {
             const listDiv = document.getElementById('users-list');
             listDiv.innerHTML = '';
@@ -64,80 +93,85 @@
                     const div = document.createElement('div');
                     div.className = 'user-item';
                     div.innerHTML = `<span>Абонент ${userId}</span> 
-                        <button id="btn-${userId}" onclick="handleBtnClick('${userId}')">ПОЗВОНИТЬ</button>`;
+                        <button class="btn-call" onclick="makeCall('${userId}')">ПОЗВОНИТЬ</button>`;
                     listDiv.appendChild(div);
                 }
             });
         });
 
-        // Клик по кнопке (либо звонить, либо сбросить)
-        function handleBtnClick(targetId) {
-            const btn = document.getElementById('btn-' + targetId);
-            if (currentCall) {
-                endCall(); // Если уже говорим — сбрасываем
-            } else {
-                makeCall(targetId); // Если нет — звоним
-            }
-        }
-
-        // Входящий звонок
+        // Когда КТО-ТО ЗВОНИТ нам
         peer.on('call', (call) => {
-            if(confirm("Вам звонят! Ответить?")) {
-                currentCall = call;
+            incomingCallRequest = call;
+            document.getElementById('main-ui').style.display = 'none';
+            document.getElementById('incoming-screen').style.display = 'block';
+            document.getElementById('caller-id').innerText = "Звонит: " + call.peer;
+        });
+
+        // Кнопка ПРИНЯТЬ
+        function acceptCall() {
+            if (incomingCallRequest) {
                 navigator.mediaDevices.getUserMedia({audio: true}).then(stream => {
-                    call.answer(stream);
-                    updateUI(true);
-                    call.on('stream', remStream => {
+                    incomingCallRequest.answer(stream);
+                    currentCall = incomingCallRequest;
+                    
+                    showActiveCallUI();
+                    
+                    currentCall.on('stream', remStream => {
                         audioEl.srcObject = remStream;
                         audioEl.play();
                     });
-                    // Если тот человек сбросил
-                    call.on('close', () => endCall());
+                    currentCall.on('close', () => endCall());
                 });
             }
-        });
+        }
 
-        // Исходящий звонок
+        // Кнопка ОТКЛОНИТЬ
+        function declineCall() {
+            if (incomingCallRequest) {
+                incomingCallRequest.close();
+                incomingCallRequest = null;
+            }
+            resetUI();
+        }
+
+        // ИСХОДЯЩИЙ звонок
         function makeCall(targetId) {
-            document.getElementById('status').innerText = "Звоним...";
+            document.getElementById('status').innerText = "Вызов: " + targetId;
             navigator.mediaDevices.getUserMedia({audio: true}).then(stream => {
                 const call = peer.call(targetId, stream);
                 currentCall = call;
-                updateUI(true, targetId);
+                showActiveCallUI();
 
                 call.on('stream', remStream => {
                     audioEl.srcObject = remStream;
                     audioEl.play();
-                    document.getElementById('status').innerText = "РАЗГОВОР...";
+                    document.getElementById('status').innerText = "РАЗГОВОР С " + targetId;
                 });
-
                 call.on('close', () => endCall());
             });
         }
 
-        // Функция завершения
         function endCall() {
-            if (currentCall) {
-                currentCall.close();
-                currentCall = null;
-            }
+            if (currentCall) currentCall.close();
+            currentCall = null;
+            incomingCallRequest = null;
             audioEl.srcObject = null;
-            document.getElementById('status').innerText = "Звонок завершен";
-            updateUI(false);
+            resetUI();
         }
 
-        // Обновление кнопок (Зеленая -> Красная)
-        function updateUI(isCalling, targetId = "") {
-            const buttons = document.querySelectorAll('button');
-            buttons.forEach(btn => {
-                if (isCalling) {
-                    btn.innerText = "СБРОСИТЬ";
-                    btn.className = "hangup-btn";
-                } else {
-                    btn.innerText = "ПОЗВОНИТЬ";
-                    btn.className = "";
-                }
-            });
+        function showActiveCallUI() {
+            document.getElementById('main-ui').style.display = 'block';
+            document.getElementById('incoming-screen').style.display = 'none';
+            document.getElementById('active-call-ui').style.display = 'block';
+            document.getElementById('users-list').style.display = 'none';
+        }
+
+        function resetUI() {
+            document.getElementById('main-ui').style.display = 'block';
+            document.getElementById('incoming-screen').style.display = 'none';
+            document.getElementById('active-call-ui').style.display = 'none';
+            document.getElementById('users-list').style.display = 'block';
+            document.getElementById('status').innerText = "Вы в сети: " + myId;
         }
     </script>
 </body>
